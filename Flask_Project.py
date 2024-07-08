@@ -20,7 +20,7 @@ posts_collection= database['posts_collection']
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "your_secret_key_here"
 
-#1 routes name, token password hashencrypt, Object_id,
+
 
 def token_required(func):
     @wraps(func)

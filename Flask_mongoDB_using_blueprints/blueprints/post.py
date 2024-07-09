@@ -18,7 +18,7 @@ def get_post(current_user, id):
         post = posts_collection.find_one({'_id': ObjectId(id)})
         if post:
             post['_id'] = str(post['_id'])  # Convert ObjectId to string for JSON serialization
-            post['author_id']=str(post['author_id'])
+            post['author_id'] = str(post['author_id'])
             return jsonify(post), 200
         else:
             return jsonify({'error': 'Post not found'}), 404
@@ -29,15 +29,15 @@ def get_post(current_user, id):
 @posts_bp.route('/posts', methods=['POST'])
 @token_required
 def create_post(current_user):
-    print("adgfdfd")
-    data = request.json
+    data = request.form
+    file = request.files.get('thumbnail')
 
     title = data.get('title')
     text = data.get("text")
     tags = data.get("tags")
     comments = data.get("comments")
 
-    if not title or not text or not tags or not comments:
+    if not title or not text or not tags or not comments or not file:
         return jsonify({"error": "Invalid input"}), 400
 
     post_data = {
@@ -48,7 +48,8 @@ def create_post(current_user):
         "likes": 0,
         "dislikes": 0,
         'author_id': current_user['_id'],
-        'created_at': datetime.utcnow()
+        'created_at': datetime.utcnow(),
+        'thumbnail': file.read()  # Save the file content (you can handle saving to disk or database as needed)
     }
     try:
         posts_collection.insert_one(post_data)
@@ -158,6 +159,7 @@ def update_comments(current_user, post_id):
             return jsonify({"error": "Comment not found or not updated"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @posts_bp.route("/posts/reactions/<post_id>", methods=["PUT"])
 @token_required

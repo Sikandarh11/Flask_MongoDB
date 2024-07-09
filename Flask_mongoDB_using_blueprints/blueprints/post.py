@@ -13,7 +13,7 @@ posts_collection = db['posts']
 def get_post(current_user, id):
     try:
         if not ObjectId.is_valid(id):
-            return jsonify({'error': 'invalid ObjectId format'}), 400
+            return jsonify({'error': 'Invalid ObjectId format'}), 400
 
         post = posts_collection.find_one({'_id': ObjectId(id)})
         if post:
@@ -38,7 +38,7 @@ def create_post(current_user):
     comments = data.get("comments")
 
     if not title or not text or not tags or not comments or not file:
-        return jsonify({"error": "invalid input"}), 400
+        return jsonify({"error": "Invalid input"}), 400
 
     post_data = {
         'title': title,
@@ -53,7 +53,7 @@ def create_post(current_user):
     }
     try:
         posts_collection.insert_one(post_data)
-        return jsonify({'message': 'post created successfully'}), 201
+        return jsonify({'message': 'Post created successfully'}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500  # Internal server error
 
@@ -75,16 +75,16 @@ def update_post(current_user, post_id):
             update_data['tags'] = [data['tags']]
 
     if not update_data:
-        return jsonify({"error": No  fields to update"}), 400
+        return jsonify({"error": "No valid fields to update"}), 400
 
     try:
         result = posts_collection.update_one({"_id": ObjectId(post_id), 'author_id': current_user['_id']}, {"$set": update_data})
         if result.modified_count > 0:
             return jsonify({"message": "Post updated successfully"}), 200
         else:
-            return jsonify({"error": "no changes made to the post"}), 304
+            return jsonify({"error": "No changes made to the post"}), 304
     except Exception as e:
-        return jsonify({"error": "failed to update post"}), 500
+        return jsonify({"error": "Failed to update post"}), 500
 
 
 @posts_bp.route('/posts/<post_id>', methods=['DELETE'])
@@ -105,7 +105,7 @@ def add_comments(current_user, post_id):
     data = request.json
     comments = data.get("comments")
     if not comments:
-        return jsonify({"error": "missing comments in request"}), 400
+        return jsonify({"error": "Missing comments in request"}), 400
 
     try:
         post = posts_collection.find_one({'_id': ObjectId(post_id), 'author_id': current_user['_id']})
@@ -116,7 +116,7 @@ def add_comments(current_user, post_id):
                 result = posts_collection.update_one({"_id": ObjectId(post_id)}, {"$push": {"comments": comments}})
                 return jsonify({"message": "Comments added successfully"}), 200
             except Exception as e:
-                return jsonify({"error": "failed to add comments"}), 500
+                return jsonify({"error": "Failed to add comments"}), 500
         else:
             return jsonify({"error": "Post not found or you are not the author"}), 404
     except Exception as e:
@@ -129,7 +129,7 @@ def delete_comments(current_user, post_id):
     data = request.json
     comments = data.get("comments")
     if not comments:
-        return jsonify({"error": "missing comments in request"}), 400
+        return jsonify({"error": "Missing comments in request"}), 400
 
     try:
         result = posts_collection.update_one({"_id": ObjectId(post_id)}, {"$pull": {"comments": comments}})
@@ -149,7 +149,7 @@ def update_comments(current_user, post_id):
     new_comment = data.get("new_comment")
 
     if not pre_comment or not new_comment:
-        return jsonify({"error": "missing pre_comment or new_comment in request"}), 400
+        return jsonify({"error": "Missing pre_comment or new_comment in request"}), 400
 
     try:
         result = posts_collection.update_one({"_id": ObjectId(post_id), "comments": pre_comment}, {"$set": {"comments.$": new_comment}})
@@ -168,7 +168,7 @@ def post_reaction(current_user, post_id):
     action = data.get("action")
 
     if action not in ['like', 'dislike']:
-        return jsonify({"error": "invalid action. Use 'like' or 'dislike'"}), 400
+        return jsonify({"error": "Invalid action. Use 'like' or 'dislike'"}), 400
 
     try:
         if action == 'like':

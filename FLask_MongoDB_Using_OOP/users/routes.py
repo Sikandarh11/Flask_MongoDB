@@ -16,8 +16,8 @@ class UserProfile(Resource):
                 user['_id'] = str(user['_id'])
                 return jsonify(user), 200
             else:
-                return jsonify({'error': 'User not found'}), 404
+                return jsonify({'error': 'user not found'}), 404
         except Exception as e:
-            return jsonify({'Error': str(e)}), 500
+            return jsonify({'error': str(e)}), 500
 
 api.add_resource(UserProfile, '/profile')

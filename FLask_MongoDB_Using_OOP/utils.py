@@ -33,7 +33,7 @@ def token_required(func):
     def decorated(*args, **kwargs):
         token = request.headers.get("x-access-token")
         if not token:
-            return jsonify({"message": "Token not found"}), 400
+            return jsonify({"message": "token not found"}), 400
         try:
             data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
             current_user = current_app.db['users'].find_one({"_id": ObjectId(data['_id'])})
@@ -41,9 +41,9 @@ def token_required(func):
                 return jsonify({"message": "Invalid token"}), 401
             return func(current_user, *args, **kwargs)
         except jwt.ExpiredSignatureError:
-            return jsonify({"error": "Token expired"}), 401
+            return jsonify({"error": "token expired"}), 401
         except jwt.InvalidTokenError:
-            return jsonify({"error": "Invalid token"}), 401
+            return jsonify({"error": "invalid token"}), 401
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 

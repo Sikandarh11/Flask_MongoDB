@@ -15,7 +15,7 @@ app.config['SECRET_KEY'] = "your_secret_key_here"
 #configuring the flask uploads
 api = Api(app, version='1.0', title='User API', description='A simple User API')
 
-auth_ns = api.namespace('auth', description='Authentication operations')
+auth_ns = api.namespace('Swagger Documentation', description='Swagger Documentation')
 # Configure Flask-Uploads
 photos = UploadSet('photos', IMAGES)
 app.config['UPLOADED_PHOTOS_DEST'] = 'uploads/photos'

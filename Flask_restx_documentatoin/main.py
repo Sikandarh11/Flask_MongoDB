@@ -3,13 +3,31 @@ from pymongo import MongoClient
 import datetime
 import jwt
 import bcrypt
-from bson import ObjectId
-from flask_restx import Api, Resource, fields
+from bson import ObjectId, Binary
+from flask_restx import Api, Resource, fields,reqparse
+from flask_uploads import UploadSet, configure_uploads, IMAGES
+from werkzeug.datastructures import FileStorage
+
 connection_string = 'mongodb+srv://sikandarnust1140:ZBXI5No3tsTeKb0u@cluster0.mo69b0z.mongodb.net/newDB?retryWrites=true&w=majority'
 client = MongoClient(connection_string)
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "your_secret_key_here"
+#configuring the flask uploads
+api = Api(app, version='1.0', title='User API', description='A simple User API')
 
+auth_ns = api.namespace('auth', description='Authentication operations')
+# Configure Flask-Uploads
+photos = UploadSet('photos', IMAGES)
+app.config['UPLOADED_PHOTOS_DEST'] = 'uploads/photos'
+configure_uploads(app, photos)
+
+
+upload_parser = reqparse.RequestParser()
+upload_parser.add_argument('file', location='files', type=FileStorage, required=True)
+upload_parser.add_argument('title', type=str, required=True)
+upload_parser.add_argument('text', type=str, required=True)
+upload_parser.add_argument('tags', type=str, required=True)
+upload_parser.add_argument('x-access-token', type=str, required=True)
 
 database = client['Authentication']
 database2 = client['userCollection']
@@ -19,9 +37,6 @@ collection = database2['user']
 posts_collection= database['posts_collection']
 
 
-api = Api(app, version='1.0', title='User API', description='A simple User API')
-
-auth_ns = api.namespace('auth', description='Authentication operations')
 
 # Define a model for the headers
 
@@ -36,8 +51,6 @@ login_model = auth_ns.model('Login', {
     'username': fields.String(required=True, description='The user username'),
     'password': fields.String(required=True, description='The user password')
 })
-
-
 get_post_comment_request_model = api.model('Get Comment Request', {
     'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
@@ -45,7 +58,6 @@ get_post_comment_request_model = api.model('Get Comment Request', {
 add_post_comment_request_model = api.model('Add Comments Request', {
      'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
-    "author_id" : fields.String(required=True, description='The author ID'),
     'comment': fields.String(required=True, description='The comment to add'),
 })
 delete_post_comment_request_model = api.model('Delete Comment Request', {
@@ -66,8 +78,6 @@ update_post_request_model1 = api.model('Post Request', {
     'thumbnail': fields.String(required=False, description='The post thumbnail'),
     'comments': fields.String(required=False, description='The post comments'),
 })
-
-
 Update_post_comment_request_model = api.model('Update Comments Request', {
     'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
@@ -75,7 +85,6 @@ Update_post_comment_request_model = api.model('Update Comments Request', {
     'new_comment': fields.String(required=True, description='New comment text'),
     'pre_comment': fields.String(required=True, description='Previous comment text'),
 })
-
 likeDislike_post_request_model = api.model('Post Request', {
     'id': fields.String(required=True, description='The post ID'),
     'reaction': fields.String(required=True, description='Post reaction (like/dislike)')
@@ -91,7 +100,55 @@ post_request_model = api.model('Post Create Request', {
     'tags': fields.String(required=True, description='The post tags'),
     #'thumbnail': fields.String(description='The post thumbnail')
 })
+refresh_model = auth_ns.model('Refresh', {
+    'refresh_token': fields.String(required=True, description='The refresh token')
+})
 
+def generate_access_token(user_id):
+    try:
+        payload = {
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30),
+            'iat': datetime.datetime.utcnow(),
+            '_id': str(user_id)
+        }
+        return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+    except Exception as e:
+        return e
+
+def generate_refresh_token(user_id):
+    try:
+        payload = {
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30),
+            'iat': datetime.datetime.utcnow(),
+            '_id': str(user_id)
+        }
+        refresh_token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
+        return refresh_token
+    except Exception as e:
+        return e
+@auth_ns.route("/refresh_token")
+class RefreshToken(Resource):
+    @auth_ns.expect(refresh_model)
+    def post(self):
+        try:
+            refresh_token = request.json.get('refresh_token')
+            if not refresh_token:
+                return {"error": "Refresh token is required"}, 400
+
+            data = jwt.decode(refresh_token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            current_user = collection.find_one({"_id": ObjectId(data['_id'])})
+            if not current_user:
+                return {"message": "Invalid token"}, 401
+
+            new_access_token = generate_access_token(data['_id'])
+            return {"access_token": new_access_token}, 200
+
+        except jwt.ExpiredSignatureError:
+            return {"message": "Refresh token has expired"}, 401
+        except jwt.InvalidTokenError:
+            return {"message": "Invalid refresh token"}, 401
+        except Exception as e:
+            return {"error": str(e)}, 500
 
 def token_required(token):
     try:
@@ -108,43 +165,37 @@ def token_required(token):
 
 @auth_ns.route('/create_post')
 class PostCreation(Resource):
-    @auth_ns.expect(post_request_model)
+    @auth_ns.expect(upload_parser)
     def post(self):
+        args = upload_parser.parse_args()
         try:
-            token = request.json.get("x-access-token")
-            if not token:
-                return {"message": "token not found"}, 400
-            current_user = token_required(token)
-            if isinstance(current_user, tuple):
-                return current_user
-        except Exception as e:
-            return {'error': f"Error in getting token: {str(e)}"}, 400
-
-        try:
-            title = request.json.get("title")
-            text = request.json.get("text")
-            tags = request.json.get("tags")
-            #thumbnail = request.files.get('thumbnail')
+            title = args["title"]
+            text = args["text"]
+            tags = args["tags"]
+            token = args['x-access-token']
         except Exception as e:
             return {"error": f"Error in taking body input: {str(e)}"}, 400
 
         if not title or not text or not tags:
             return {"error": "Invalid input"}, 400
+        try:
+            current_user =token_required(token)
+        except:
+            return "error in getting the current user"
+        try:
+            args = upload_parser.parse_args()
+            uploaded_file = args['file']
+            if not uploaded_file:
+                return {"error": "in uploaded args"}
+            file_data = Binary(uploaded_file.read())
+        except:
+            return {"error": " in getting file"}
 
-        '''thumbnail_url = None
-        if thumbnail and thumbnail.filename != '':
-            try:
-                filename = photos.save(thumbnail)
-                thumbnail_url = photos.url(filename)
-            except Exception as e:
-                return {"error": f"Error in saving thumbnail: {str(e)}"}, 500
-                "thumbnail": thumbnail_url,
-'''
         post_data = {
             'title': title,
             "text": text,
             "tags": [tags] if isinstance(tags, str) else tags,
-
+            "thumbnail" : file_data,
             "comments": [],
             "likes": 0,
             "dislikes": 0,
@@ -157,7 +208,6 @@ class PostCreation(Resource):
             return {'message': 'Post created successfully'}, 201
         except Exception as e:
             return {'error': str(e)}, 500  # Internal server error
-
 
 @auth_ns.route("/get_post")
 class PostGet(Resource):
@@ -178,8 +228,19 @@ class PostGet(Resource):
         try:
             post = posts_collection.find_one({"_id": ObjectId(post_id)})
             if post:
-                post['_id'] = str(post['_id'])
-                return {"message": [post['comments'], post['_id']]}, 200
+                post_data = {
+                    "ID" : str(post['_id']),
+                    "Title" : str(post['title']),
+                    "text":str(post['text']),
+                    "tags": str(post['tags']),
+                #"thumbnail" : file_data,
+                "comments": str(post['comments']),
+                "likes": str(post['likes']),
+                "dislikes": str(post['dislikes']),
+                'author_id': str(post['author_id']),
+                'created_at': str(post['created_at'])
+            }
+                return {"message": post_data}, 200
             else:
                 return {"error": "Post not found"}, 404
         except Exception as e:
@@ -220,7 +281,6 @@ class AddComments(Resource):
                 return {"error": "Post not found or you are not the author"}, 404
         except Exception as e:
             return {"error": str(e)}, 500
-
 
 @auth_ns.route("/delete_comments")
 class deleteComments(Resource):
@@ -369,16 +429,21 @@ class Login(Resource):
                 return {"message": "User not found"}, 404
 
             if bcrypt.checkpw(password.encode("utf-8"), document['password']):
-                token = jwt.encode({
+                access_token = jwt.encode({
                     "_id": str(document['_id']),
-                    "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+                    "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
                 }, app.config['SECRET_KEY'], algorithm="HS256")
-                return {"Token": token}, 200
+
+                refresh_token = jwt.encode({
+                    "_id": str(document['_id']),
+                    "exp": datetime.datetime.utcnow() + datetime.timedelta(days=30)
+                }, app.config['SECRET_KEY'], algorithm="HS256")
+
+                return {"access_token": access_token, "refresh_token": refresh_token}, 200
             else:
                 return {"error": "Login Unsuccessful"}, 401
         except Exception as e:
             return {"error": "Login Unsuccessful", "details": str(e)}, 500
-
 @auth_ns.route('/update_post')
 class UpdatePost(Resource):
     @auth_ns.expect(update_post_request_model1)
@@ -460,6 +525,7 @@ class DeletePost(Resource):
                 return {"error": "Post not deleted"}, 400
         except Exception as e:
             return {"error": "An error occurred during post deletion", "details": str(e)}, 500
+
 
 api.add_namespace(auth_ns, path='/auth')
 if __name__ == "__main__":

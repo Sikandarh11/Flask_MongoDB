@@ -93,13 +93,7 @@ get_post_model_request = auth_ns.model("Get Post", {
     'x-access-token': fields.String(required=True, description="x-access-token"),
     "id": fields.String(required=True, description="Post ID")
 })
-post_request_model = api.model('Post Create Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
-    'title': fields.String(required=True, description='The post title'),
-    'text': fields.String(required=True, description='The post text'),
-    'tags': fields.String(required=True, description='The post tags'),
-    #'thumbnail': fields.String(description='The post thumbnail')
-})
+
 refresh_model = auth_ns.model('Refresh', {
     'refresh_token': fields.String(required=True, description='The refresh token')
 })

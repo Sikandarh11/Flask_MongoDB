@@ -1,4 +1,6 @@
-from flask import Flask, request,jsonify
+import io
+
+from flask import Flask, request, jsonify, send_file
 from pymongo import MongoClient
 import datetime
 import jwt
@@ -93,7 +95,6 @@ get_post_model_request = auth_ns.model("Get Post", {
     'x-access-token': fields.String(required=True, description="x-access-token"),
     "id": fields.String(required=True, description="Post ID")
 })
-
 refresh_model = auth_ns.model('Refresh', {
     'refresh_token': fields.String(required=True, description='The refresh token')
 })
@@ -108,7 +109,6 @@ def generate_access_token(user_id):
         return jwt.encode(payload, app.config['SECRET_KEY'], algorithm='HS256')
     except Exception as e:
         return e
-
 def generate_refresh_token(user_id):
     try:
         payload = {
@@ -143,7 +143,6 @@ class RefreshToken(Resource):
             return {"message": "Invalid refresh token"}, 401
         except Exception as e:
             return {"error": str(e)}, 500
-
 def token_required(token):
     try:
         data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
@@ -181,7 +180,9 @@ class PostCreation(Resource):
             uploaded_file = args['file']
             if not uploaded_file:
                 return {"error": "in uploaded args"}
-            file_data = Binary(uploaded_file.read())
+            #file_data = Binary(uploaded_file.read())
+            file_data = uploaded_file.read()
+
         except:
             return {"error": " in getting file"}
 
@@ -239,6 +240,21 @@ class PostGet(Resource):
                 return {"error": "Post not found"}, 404
         except Exception as e:
             return {"error": "An error occurred while retrieving the post", "details": str(e)}, 500
+@app.route("/get_post/<id>")
+def get_post(id):
+    try:
+        post = posts_collection.find_one({"_id": ObjectId(id)})
+        if not post:
+            return jsonify({"error": "Post not found"}), 404
+        thumbnail_binary = post['thumbnail']
+        thumbnail_file = (thumbnail_binary)
+        return send_file(
+            io.BytesIO(thumbnail_file),
+            mimetype='image/jpeg',
+            as_attachment=False
+        ), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @auth_ns.route("/add_comments")
 class AddComments(Resource):
@@ -523,4 +539,4 @@ class DeletePost(Resource):
 
 api.add_namespace(auth_ns, path='/auth')
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=8000)

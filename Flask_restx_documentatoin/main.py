@@ -1,46 +1,47 @@
-import io
-
-from flask import Flask, request, jsonify, send_file
-from pymongo import MongoClient
-import datetime
-import jwt
 import bcrypt
-from bson import ObjectId, Binary
-from flask_restx import Api, Resource, fields,reqparse
 from flask_uploads import UploadSet, configure_uploads, IMAGES
+import jwt
+from bson.objectid import ObjectId
+from flask import Flask, request, url_for, send_from_directory, current_app
+from pymongo import MongoClient
 from werkzeug.datastructures import FileStorage
+from werkzeug.utils import secure_filename
+import os
+import datetime
+from flask_restx import Api, Resource, fields, reqparse
 
-connection_string = 'mongodb+srv://sikandarnust1140:ZBXI5No3tsTeKb0u@cluster0.mo69b0z.mongodb.net/newDB?retryWrites=true&w=majority'
-client = MongoClient(connection_string)
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = "your_secret_key_here"
-#configuring the flask uploads
-api = Api(app, version='1.0', title='User API', description='A simple User API')
+app.config['UPLOAD_FOLDER'] = 'uploads'  # Directory to save uploaded files
+app.config['MAX_CONTENT_PATH'] = 16 * 1024 * 1024  # 16 MB max upload size
 
-auth_ns = api.namespace('Swagger Documentation', description='Swagger Documentation')
-# Configure Flask-Uploads
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+app.config['SECRET_KEY'] = "your_secret_key_here"
+# Define authorizations for API
+authorizations = {
+    'apikey': {
+        'type': 'apiKey',
+        'in': 'header',
+        'name': 'x-access-token'
+    }
+}
+api = Api(app, authorizations=authorizations, security='apikey')
+auth_ns = api.namespace('Post_management', description='Post Management')
+
+
 photos = UploadSet('photos', IMAGES)
 app.config['UPLOADED_PHOTOS_DEST'] = 'uploads/photos'
 configure_uploads(app, photos)
 
-
-upload_parser = reqparse.RequestParser()
-upload_parser.add_argument('file', location='files', type=FileStorage, required=True)
-upload_parser.add_argument('title', type=str, required=True)
-upload_parser.add_argument('text', type=str, required=True)
-upload_parser.add_argument('tags', type=str, required=True)
-upload_parser.add_argument('x-access-token', type=str, required=True)
-
+connection_string = 'mongodb+srv://sikandarnust1140:ZBXI5No3tsTeKb0u@cluster0.mo69b0z.mongodb.net/newDB?retryWrites=true&w=majority'
+client = MongoClient(connection_string)
 database = client['Authentication']
 database2 = client['userCollection']
-
-# collections
 collection = database2['user']
 posts_collection= database['posts_collection']
 
 
-
-# Define a model for the headers
 
 register_model = auth_ns.model('Register', {
     'username': fields.String(required=True, description='The user username'),
@@ -54,36 +55,21 @@ login_model = auth_ns.model('Login', {
     'password': fields.String(required=True, description='The user password')
 })
 get_post_comment_request_model = api.model('Get Comment Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
 })
 add_post_comment_request_model = api.model('Add Comments Request', {
-     'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
     'comment': fields.String(required=True, description='The comment to add'),
 })
 delete_post_comment_request_model = api.model('Delete Comment Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
     "id": fields.String(required=True, description="Post ID"),
     "comment": fields.String(required=True, description="Delete post comment")
 })
 delete_post_request_model = api.model('Post Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
      "id": fields.String(required=True, description="Post ID")
 })
-update_post_request_model1 = api.model('Post Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
-    'id': fields.String(required=True, description='The post ID'),
-    'title': fields.String(required=False, description='The post title'),
-    'text': fields.String(required=False, description='The post text'),
-    'tags': fields.String(required=False, description='The post tags'),
-    'thumbnail': fields.String(required=False, description='The post thumbnail'),
-    'comments': fields.String(required=False, description='The post comments'),
-})
 Update_post_comment_request_model = api.model('Update Comments Request', {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
     'id': fields.String(required=True, description='The post ID'),
-    'author_id': fields.String(required=True, description='Author ID'),
     'new_comment': fields.String(required=True, description='New comment text'),
     'pre_comment': fields.String(required=True, description='Previous comment text'),
 })
@@ -92,12 +78,28 @@ likeDislike_post_request_model = api.model('Post Request', {
     'reaction': fields.String(required=True, description='Post reaction (like/dislike)')
 })
 get_post_model_request = auth_ns.model("Get Post", {
-    'x-access-token': fields.String(required=True, description="x-access-token"),
     "id": fields.String(required=True, description="Post ID")
 })
 refresh_model = auth_ns.model('Refresh', {
     'refresh_token': fields.String(required=True, description='The refresh token')
 })
+
+
+post_request = reqparse.RequestParser()
+post_request.add_argument('file', location='files', type=FileStorage, required=True)
+post_request.add_argument('title', type=str, required=True)
+post_request.add_argument('text', type=str, required=True)
+post_request.add_argument('tags', type=str, required=True)
+
+update_post_request = reqparse.RequestParser()
+update_post_request.add_argument('id', type=str, required=True)
+update_post_request.add_argument('file', location='files', type=FileStorage)
+update_post_request.add_argument('title', type=str)
+update_post_request.add_argument('text', type=str)
+update_post_request.add_argument('tags', type=str)
+update_post_request.add_argument('comments', type=str)
+
+
 
 def generate_access_token(user_id):
     try:
@@ -143,131 +145,122 @@ class RefreshToken(Resource):
             return {"message": "Invalid refresh token"}, 401
         except Exception as e:
             return {"error": str(e)}, 500
-def token_required(token):
+
+def token_required():
     try:
-        data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        token = request.headers.get('x-access-token')
+        if not token:
+            return {'message': 'Token is missing!'}, 401, None
+    except Exception as e:
+        return {"error": "Token not found"}, 400, None
+
+    try:
+        data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
         current_user = collection.find_one({"_id": ObjectId(data['_id'])})
         if not current_user:
-            return {"message": "Invalid token"}, 401
+            return {'message': 'yser not found'}, 404, None
     except jwt.ExpiredSignatureError:
-        return {"message": "Token has expired"}, 401
+        return {'message': 'token has expired!'}, 401, None
     except jwt.InvalidTokenError:
-        return {"message": "Invalid token"}, 401
+        return {'message': 'invalid token!'}, 401, None
+    except Exception as e:
+        return {'message': f'Error in token decoding: {str(e)}'}, 500, None
+
     return current_user
 
 
+# Post creation endpoint
 @auth_ns.route('/create_post')
 class PostCreation(Resource):
-    @auth_ns.expect(upload_parser)
+    @api.expect(post_request)
     def post(self):
-        args = upload_parser.parse_args()
+        current_user = token_required()
+        args = post_request.parse_args()
         try:
             title = args["title"]
             text = args["text"]
             tags = args["tags"]
-            token = args['x-access-token']
-        except Exception as e:
-            return {"error": f"Error in taking body input: {str(e)}"}, 400
-
-        if not title or not text or not tags:
-            return {"error": "Invalid input"}, 400
-        try:
-            current_user =token_required(token)
-        except:
-            return "error in getting the current user"
-        try:
-            args = upload_parser.parse_args()
             uploaded_file = args['file']
-            if not uploaded_file:
-                return {"error": "in uploaded args"}
-            #file_data = Binary(uploaded_file.read())
-            file_data = uploaded_file.read()
+            if not title or not text or not tags or not uploaded_file:
+                return {"error": "Invalid input"}, 400
 
-        except:
-            return {"error": " in getting file"}
-
-        post_data = {
-            'title': title,
-            "text": text,
-            "tags": [tags] if isinstance(tags, str) else tags,
-            "thumbnail" : file_data,
-            "comments": [],
-            "likes": 0,
-            "dislikes": 0,
-            'author_id': current_user['_id'],
-            'created_at': datetime.datetime.utcnow()
-        }
+        except Exception as e:
+            return {"error": f"Error parsing input: {str(e)}"}, 400
 
         try:
-            posts_collection.insert_one(post_data)
-            return {'message': 'Post created successfully'}, 201
+            # Secure the filename
+            filename = secure_filename(uploaded_file.filename)
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+
+            # Save the uploaded file
+            uploaded_file.save(file_path)
         except Exception as e:
-            return {'error': str(e)}, 500  # Internal server error
+            return {"message": f"File upload error: {str(e)}"}, 400
+
+        try:
+            # Create post data
+            post_data = {
+                'title': title,
+                'text': text,
+                'tags': tags,
+                'thumbnail_url': url_for('get_file', filename=filename, _external=True),
+                'comments': [],
+                'likes': 0,
+                'dislikes': 0,
+                'author_id': str(current_user['_id']),
+                'created_at': datetime.datetime.utcnow()
+            }
+
+            # Insert the post data into the database
+            posts_collection.insert_one(post_data)
+
+            return {"message": "Post created successfully", "thumbnail_url": post_data['thumbnail_url']}, 201
+        except Exception as e:
+            return {"error": f"Error in creating post data: {str(e)}"}, 400
 
 @auth_ns.route("/get_post")
 class PostGet(Resource):
     @auth_ns.expect(get_post_model_request)
     def post(self):
-        token = request.json.get("x-access-token")
-        if not token:
-            return {"error": "Token is required"}, 400
-
-        current_user = token_required(token)
-        if "error" in current_user:
-            return current_user
-
         post_id = request.json.get("id")
         if not post_id:
             return {"error": "Post ID is required"}, 400
-
+        current_user = token_required()
         try:
-            post = posts_collection.find_one({"_id": ObjectId(post_id)})
+            post = posts_collection.find_one(
+                {"_id": ObjectId(post_id)}
+            )
+        except:
+            return "post not found"
+        try:
             if post:
+                if str(current_user['_id']) != post['author_id']:
+                    return "you are not the author"
                 post_data = {
-                    "ID" : str(post['_id']),
-                    "Title" : str(post['title']),
-                    "text":str(post['text']),
-                    "tags": str(post['tags']),
-                #"thumbnail" : file_data,
+                "Title" : post['title'],
+               "text":str(post['text']),
+                "thumbnail_url" : str(post['thumbnail_url']),
+                "tags": str(post['tags']),
                 "comments": str(post['comments']),
                 "likes": str(post['likes']),
                 "dislikes": str(post['dislikes']),
                 'author_id': str(post['author_id']),
-                'created_at': str(post['created_at'])
+               'created_at': str(post['created_at'])
             }
                 return {"message": post_data}, 200
             else:
                 return {"error": "Post not found"}, 404
         except Exception as e:
             return {"error": "An error occurred while retrieving the post", "details": str(e)}, 500
-@app.route("/get_post/<id>")
-def get_post(id):
-    try:
-        post = posts_collection.find_one({"_id": ObjectId(id)})
-        if not post:
-            return jsonify({"error": "Post not found"}), 404
-        thumbnail_binary = post['thumbnail']
-        thumbnail_file = (thumbnail_binary)
-        return send_file(
-            io.BytesIO(thumbnail_file),
-            mimetype='image/jpeg',
-            as_attachment=False
-        ), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+
+@app.route('/uploads/<filename>')
+def get_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 @auth_ns.route("/add_comments")
 class AddComments(Resource):
     @auth_ns.expect(add_post_comment_request_model)
     def put(self):
-        try:
-            token = request.json.get("x-access-token")
-            current_user = token_required(token)
-            if "error" in current_user:
-                return current_user
-        except:
-            return {"error": "Error in getting token"}
-
         try:
             data = request.json
             post_id = data.get("id")
@@ -278,34 +271,24 @@ class AddComments(Resource):
             return {"error": "Error in processing input data"}, 400
 
         try:
-            post = posts_collection.find_one({'_id': ObjectId(post_id), 'author_id': current_user['_id']})
-            if post:
-                if "comments" not in post:
-                    posts_collection.update_one({"_id": ObjectId(post_id)}, {"$set": {"comments": []}})
-                try:
-                    result = posts_collection.update_one({"_id": ObjectId(post_id)}, {"$push": {"comments": comments}})
-                    return {"message": "Comments added successfully"}, 200
-                except Exception as e:
-                    return {"error": "Failed to add comments", "details": str(e)}, 500
-            else:
-                return {"error": "Post not found or you are not the author"}, 404
+            current_user = token_required()
+            result = posts_collection.update_one({"_id": ObjectId(post_id), 'author_id': str(current_user['_id'])},
+                                                         {"$push": {"comments": comments}})
+            if result.matched_count == 0:
+                return {'error': 'Post not found or you are not the author'}, 404
+
+            return {'message': 'Comment added successfully'}, 200
+
         except Exception as e:
             return {"error": str(e)}, 500
+
+
 
 @auth_ns.route("/delete_comments")
 class deleteComments(Resource):
     @auth_ns.expect(delete_post_comment_request_model)
     def put(self):
         data = request.json
-        current_user = {"error": ""}
-        try:
-            token = data.get("x-access-token")
-            current_user = token_required(token)
-        except:
-            return {"error": "Invalid token"}, 400
-
-        if "error" in current_user:
-            return current_user, 400
 
         post_id = data.get("id")
         comment = data.get("comment")
@@ -313,8 +296,9 @@ class deleteComments(Resource):
             return {"error": "Invalid id"}, 400
 
         try:
+            current_user = token_required()
             result = posts_collection.update_one(
-                {'_id': ObjectId(post_id), 'author_id': current_user['_id']},
+                {'_id': ObjectId(post_id), 'author_id': str(current_user['_id'])},
                 {"$pull": {"comments": comment}}
             )
 
@@ -330,27 +314,17 @@ class UpdateComments(Resource):
     @auth_ns.expect(Update_post_comment_request_model)
     def put(self):
         try:
-            token = request.json.get("x-access-token")
-            if not token:
-                return {"error": "Token is missing"}, 400
-
-            current_user = token_required(token)
-            if "error" in current_user:
-                return current_user
-        except Exception as e:
-            return {"error": f"Error in processing token: {str(e)}"}, 400
-
-        try:
             data = request.json
             post_id = data.get("id")
             pre_comment = data.get("pre_comment")
             new_comment = data.get("new_comment")
+            current_user = token_required()
 
             if not post_id or not pre_comment or not new_comment:
                 return {"error": "Invalid input"}, 400
 
             result = posts_collection.update_one(
-                {"_id": ObjectId(post_id), "comments": pre_comment},
+                {"_id": ObjectId(post_id), "comments": pre_comment, "author_id" : str(current_user['_id'])},
                 {"$set": {"comments.$": new_comment}}
             )
 
@@ -454,51 +428,73 @@ class Login(Resource):
                 return {"error": "Login Unsuccessful"}, 401
         except Exception as e:
             return {"error": "Login Unsuccessful", "details": str(e)}, 500
+
+update_post_model = api.model('Post Request', {
+    'id': fields.String(required=True, description='The post ID'),
+    'title': fields.String(required=False, description='The post title'),
+    'text': fields.String(required=False, description='The post text'),
+    'tags': fields.String(required=False, description='The post tags'),
+    'thumbnail': fields.String(required=False, description='The post thumbnail'),
+    'comments': fields.String(required=False, description='The post comments'),
+})
+
+
+
 @auth_ns.route('/update_post')
 class UpdatePost(Resource):
-    @auth_ns.expect(update_post_request_model1)
+    @auth_ns.expect(update_post_request)
     def put(self):
+        update_fields = {}
+        post_id = ""
+        args = update_post_request.parse_args()
         try:
-            token = request.json.get("x-access-token")
-            if not token:
-                return {"error": "Token is missing"}, 400
-
-            current_user = token_required(token)
-            if "error" in current_user:
-                return current_user
-        except Exception as e:
-            return {"error": f"Error in processing token: {str(e)}"}, 400
-
-        try:
-            data = request.json
-            post_id = data.get("id")
+            post_id = args["id"]
             if not post_id:
                 return {"error": "Post ID is required"}, 400
-
-            update_fields = {}
-            if "title" in data:
-                update_fields["title"] = data["title"]
-            if "text" in data:
-                update_fields["text"] = data["text"]
-            if "tags" in data:
-                update_fields["tags"] = data["tags"]
-            if "thumbnail" in data:
-                update_fields["thumbnail"] = data["thumbnail"]
-            if "comments" in data:
-                update_fields["comments"] = data["comments"]
+        except KeyError as e:
+            return {"error": f"Missing key: {str(e)}"}, 400
+        except Exception as e:
+            return {"error": f"An error occurred before title: {str(e)}"}, 500
+        try:
+            uploaded_file = args['file']
+            filename = secure_filename(uploaded_file.filename)
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        # Save the uploaded file
+            uploaded_file.save(file_path)
+            update_fields['thumbnail_url'] = url_for('get_file', filename=filename, _external=True)
+        except Exception as e:
+            return {"message": f"File upload error: {str(e)}"}, 400
+        try:
+            if args["title"]:
+                update_fields["title"] = args["title"]
+            if args['text']:
+                update_fields['text'] = args['text']
+            if args['tags']:
+                update_fields['tags'] = args['tags']
 
             if not update_fields:
+                print("update fields", update_fields)
                 return {"error": "No fields to update"}, 400
 
+        except KeyError as e:
+            return {"error": f"Missing key: {str(e)}"}, 400
+        except Exception as e:
+            return {"error": f"An error occurred in input: {str(e)}"}, 500
+
+        try:
+            current_user = token_required()
+            # Debugging print statement
+            print(f"Current User: {current_user}")
+
             result = posts_collection.update_one(
-                {"_id": ObjectId(post_id), "author_id": current_user['_id']},
+                {"_id": ObjectId(post_id), "author_id" : str(current_user['_id'])},
                 {"$set": update_fields}
             )
 
             if result.modified_count > 0:
                 return {"message": "Post updated successfully"}, 200
             else:
-                return {"error": "Post not found or you are not the author"}, 404
+                return {"error": "Post not found111"}, 404
         except Exception as e:
             return {"error": "An error occurred while updating the post", "details": str(e)}, 500
 
@@ -507,32 +503,20 @@ class DeletePost(Resource):
     @auth_ns.expect(get_post_model_request)
     def delete(self):
         try:
-            token = request.json.get("x-access-token")
-            if not token:
-                return {"error": "Token is missing"}, 400
-
-            current_user = token_required(token)
-            if "error" in current_user:
-                return current_user
-        except Exception as e:
-            return {"error": f"Error in processing token: {str(e)}"}, 400
-
-        try:
             data = request.json
             post_id = data.get("id")
             if not post_id:
                 return {"error": "Post ID is required"}, 400
-
-            post = posts_collection.find_one({"_id": ObjectId(post_id), "author_id": current_user['_id']})
+            current_user = token_required()
+            post = posts_collection.find_one({"_id": ObjectId(post_id)})
             if not post:
-                return {"error": "Post not found or you are not the author"}, 404
-
-            posts_collection.delete_one({"_id": ObjectId(post_id)})
-
-            if not posts_collection.find_one({"_id": ObjectId(post_id)}):
-                return {"message": "Post deleted successfully"}, 200
+                return {"error": "Post not found "}, 404
+            elif post["author_id"] ==  str(current_user['_id']):
+                posts_collection.delete_one({"_id": ObjectId(post_id)})
             else:
-                return {"error": "Post not deleted"}, 400
+                return "you are not the author"
+            return {"message": "Post deleted successfully"}, 200
+
         except Exception as e:
             return {"error": "An error occurred during post deletion", "details": str(e)}, 500
 

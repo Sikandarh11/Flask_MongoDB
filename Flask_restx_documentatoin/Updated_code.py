@@ -1,4 +1,3 @@
-
 import bcrypt
 from flask_uploads import UploadSet, configure_uploads, IMAGES
 import jwt
@@ -57,7 +56,7 @@ login_model = auth_ns.model('Login', {
 get_post_comment_request_model = api.model('Get Comment Request', {
     'id': fields.String(required=True, description='The post ID'),
 })
-add_post_comment_request_model = api.model('Add Comments Request', {
+add_post_comment_request_model = auth_ns.model('Add Comments Request', {
     'id': fields.String(required=True, description='The post ID'),
     'comment': fields.String(required=True, description='The comment to add'),
 })
@@ -73,10 +72,7 @@ Update_post_comment_request_model = api.model('Update Comments Request', {
     'new_comment': fields.String(required=True, description='New comment text'),
     'pre_comment': fields.String(required=True, description='Previous comment text'),
 })
-likeDislike_post_request_model = api.model('Post Request', {
-    'id': fields.String(required=True, description='The post ID'),
-    'reaction': fields.String(required=True, description='Post reaction (like/dislike)')
-})
+
 get_post_model_request = auth_ns.model("Get Post", {
     "id": fields.String(required=True, description="Post ID")
 })
@@ -98,6 +94,18 @@ update_post_request.add_argument('title', type=str)
 update_post_request.add_argument('text', type=str)
 update_post_request.add_argument('tags', type=str)
 update_post_request.add_argument('comments', type=str)
+update_post_model = api.model('Post Request', {
+    'id': fields.String(required=True, description='The post ID'),
+    'title': fields.String(required=False, description='The post title'),
+    'text': fields.String(required=False, description='The post text'),
+    'tags': fields.String(required=False, description='The post tags'),
+    'thumbnail': fields.String(required=False, description='The post thumbnail'),
+    'comments': fields.String(required=False, description='The post comments'),
+})
+likedislikemodel = auth_ns.model('Post Request', {
+    'id': fields.String(required=True, description='The post ID'),
+    'reaction': fields.String(required=True, description='Post reaction (like/dislike)')
+})
 
 
 
@@ -262,6 +270,7 @@ class PostDetails(Resource):
 def get_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
+
 @auth_ns.route("/add_comments")
 class AddComments(Resource):
     @auth_ns.expect(add_post_comment_request_model)
@@ -269,24 +278,25 @@ class AddComments(Resource):
         try:
             data = request.json
             post_id = data.get("id")
-            comments = data.get("comment")
-            if not post_id or not comments:
-                return {"error": "Invalid id or comments"}, 400
+            comment = data.get("comment")
+            if not post_id or not comment:
+                return {"error": "Invalid id or comment"}, 400
         except:
             return {"error": "Error in processing input data"}, 400
 
         try:
+            # Use $setOnInsert to create the list if it doesn't exist
             current_user = token_required()
-            result = posts_collection.update_one({"_id": ObjectId(post_id), 'author_id': str(current_user['_id'])},
-                                                         {"$push": {"comments": comments}})
-            if result.matched_count == 0:
+            result = posts_collection.update_one({"_id": ObjectId(post_id)},
+                                                 {"$push": {"comments": comment}})
+
+            if result.matched_count == 0 and result.upserted_id is None:
                 return {'error': 'Post not found or you are not the author'}, 404
 
             return {'message': 'Comment added successfully'}, 200
 
         except Exception as e:
             return {"error": str(e)}, 500
-
 
 
 @auth_ns.route("/delete_comments")
@@ -340,9 +350,11 @@ class UpdateComments(Resource):
         except Exception as e:
             return {"error": f"An error occurred: {str(e)}"}, 500
 
+
+
 @auth_ns.route("/like_dislike")
 class LikeDislike(Resource):
-    @auth_ns.expect(likeDislike_post_request_model)
+    @auth_ns.expect(likedislikemodel)
     def put(self):
         data = request.json
         id = data.get("id")
@@ -434,15 +446,6 @@ class Login(Resource):
         except Exception as e:
             return {"error": "Login Unsuccessful", "details": str(e)}, 500
 
-update_post_model = api.model('Post Request', {
-    'id': fields.String(required=True, description='The post ID'),
-    'title': fields.String(required=False, description='The post title'),
-    'text': fields.String(required=False, description='The post text'),
-    'tags': fields.String(required=False, description='The post tags'),
-    'thumbnail': fields.String(required=False, description='The post thumbnail'),
-    'comments': fields.String(required=False, description='The post comments'),
-})
-
 
 
 @auth_ns.route('/update_post')
@@ -461,23 +464,44 @@ class UpdatePost(Resource):
         except Exception as e:
             return {"error": f"An error occurred before title: {str(e)}"}, 500
         try:
-            uploaded_file = args['file']
-            filename = secure_filename(uploaded_file.filename)
-            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        # Save the uploaded file
-            uploaded_file.save(file_path)
-            update_fields['thumbnail_url'] = url_for('get_file', filename=filename, _external=True)
+            post = posts_collection.find_one({"_id" : ObjectId(post_id)})
+        except:
+            return {"Post not fonud"}
+        try:
+            if 'file' in args and args['file']:
+                uploaded_file = args['file']
+                filename = secure_filename(uploaded_file.filename)
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                # Save the uploaded file
+                uploaded_file.save(file_path)
+                update_fields['thumbnail_url'] = url_for('get_file', filename=filename, _external=True)
+            else:
+                update_fields['thumbnail_url'] = post['thumbnail_url']
         except Exception as e:
             return {"message": f"File upload error: {str(e)}"}, 400
         try:
-            if args["title"]:
-                update_fields["title"] = args["title"]
-            if args['text']:
-                update_fields['text'] = args['text']
-            if args['tags']:
-                update_fields['tags'] = args['tags']
 
-            if not update_fields:
+            if args["title"] != "":
+                update_fields["title"] = args["title"]
+            else:
+                update_fields["title"]  = post['title']
+
+            if args['text'] !="":
+                update_fields['text'] = args['text']
+            else:
+                update_fields["text"] = post['text']
+
+            if args['tags']!="":
+                update_fields['tags'] = args['tags']
+            else:
+                update_fields["tags"] = post["tags"]
+
+            if args['comments']!="":
+                update_fields['comments'] = args['comments']
+            else:
+                update_fields["comments"] = post["comments"]
+
+            if not update_fields!="":
                 print("update fields", update_fields)
                 return {"error": "No fields to update"}, 400
 
@@ -499,7 +523,7 @@ class UpdatePost(Resource):
             if result.modified_count > 0:
                 return {"message": "Post updated successfully"}, 200
             else:
-                return {"error": "Post not found111"}, 404
+                return {"error": "Post not found"}, 404
         except Exception as e:
             return {"error": "An error occurred while updating the post", "details": str(e)}, 500
 

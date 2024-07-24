@@ -27,7 +27,7 @@ authorizations = {
     }
 }
 api = Api(app, authorizations=authorizations, security='apikey')
-auth_ns = api.namespace('Post_management', description='Post Management')
+auth_ns = api.namespace('post_management', description='Post Management')
 
 
 photos = UploadSet('photos', IMAGES)

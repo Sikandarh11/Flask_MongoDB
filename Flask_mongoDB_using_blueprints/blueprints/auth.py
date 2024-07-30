@@ -11,9 +11,9 @@ users_collection = db['users']
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+
+    username = request.form.get('username')
+    password = request.form.get('password')
 
     if not username or not password:
         return jsonify({'error': 'Missing username or password'}), 400
@@ -31,9 +31,8 @@ def register():
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    username = request.form.get('username')
+    password = request.form.get('password')
 
     if not username or not password:
         return jsonify({'error': 'Missing username or password'}), 400
@@ -54,7 +53,7 @@ def token_required(f):
             return jsonify({'message': 'Token is missing!'}), 403
         try:
             data = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=['HS256'])
-            current_user = users_collection.find_one({'_id': ObjectId(data['sub'])})
+            current_user = users_collection.find_one({'_id': ObjectId(data['_id'])})
         except jwt.ExpiredSignatureError:
             return jsonify({'message': 'Token is expired!'}), 403
         except jwt.InvalidTokenError:
@@ -77,12 +76,14 @@ def generate_access_token(user_id):
 
 def generate_refresh_token(user_id):
     try:
+        print("generate_refresh_token called" )
         payload = {
             'exp': datetime.datetime.utcnow() + datetime.timedelta(days=30),
             'iat': datetime.datetime.utcnow(),
             '_id': str(user_id)
         }
         refresh_token = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm='HS256')
+        print("refresh token generated")
         return refresh_token
     except Exception as e:
         return e
@@ -91,7 +92,7 @@ def generate_refresh_token(user_id):
 
 @auth_bp.route('/refresh', methods=['POST'])
 def refresh():
-    refresh_token = request.json.get('refresh_token')
+    refresh_token = request.form.get('refresh_token')
 
     if not refresh_token:
         return jsonify({'error': 'Refresh token is missing!'}), 400
@@ -114,4 +115,3 @@ def refresh():
         return jsonify({'error': 'Invalid refresh token!'}), 403
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-

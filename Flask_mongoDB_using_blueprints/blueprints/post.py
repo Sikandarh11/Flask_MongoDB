@@ -1,3 +1,6 @@
+import uuid
+import firebase_admin
+from firebase_admin import credentials, auth, storage
 from flask import Blueprint, request, jsonify
 from bson import ObjectId
 from datetime import datetime
@@ -6,6 +9,11 @@ from blueprints.auth import token_required
 
 posts_bp = Blueprint('posts', __name__)
 posts_collection = db['posts']
+cred = credentials.Certificate("D:\\influential-kit-430506-m-45094-firebase-adminsdk-3gh5f-4781881dca.json")
+firebase_admin.initialize_app(cred, {
+    'storageBucket': 'influential-kit-430506-m-45094.appspot.com'
+})
+bucket = storage.bucket()
 
 
 @posts_bp.route('/posts/<id>', methods=['GET'])
@@ -25,35 +33,59 @@ def get_post(current_user, id):
     except Exception as e:
         return jsonify({'Error': str(e)}), 500  # Internal server error
 
-
 @posts_bp.route('/posts', methods=['POST'])
 @token_required
 def create_post(current_user):
-    data = request.form
     file = request.files.get('thumbnail')
+    title = request.form.get('title')
+    text = request.form.get("text")
+    tags = request.form.get("tags")
 
-    title = data.get('title')
-    text = data.get("text")
-    tags = data.get("tags")
-    comments = data.get("comments")
-
-    if not title or not text or not tags or not comments or not file:
+    # Validate form data
+    if not title or not text or not tags:
         return jsonify({"error": "Invalid input"}), 400
 
+
+    if not file:
+        return jsonify({"error": "No file provided"}), 400
+
+    # Upload the thumbnail to Firebase Storage
+    try:
+        file_id = str(uuid.uuid4())
+        blob = bucket.blob(file_id)
+        blob.upload_from_file(file, content_type=file.content_type)
+
+        # Get the public URL of the uploaded file
+        thumbnail_url = blob.public_url
+    except Exception as e:
+        return jsonify({'error': 'Failed to upload thumbnail: ' + str(e)}), 500
+
+    # Prepare post data
     post_data = {
         'title': title,
         "text": text,
         "tags": [tags] if isinstance(tags, str) else tags,
-        "comments": "",
+        "comments": [],
         "likes": 0,
         "dislikes": 0,
         'author_id': current_user['_id'],
         'created_at': datetime.utcnow(),
-        'thumbnail': file.read()  # Save the file content (you can handle saving to disk or database as needed)
+        'thumbnail_url': thumbnail_url  # Save the URL of the uploaded thumbnail
     }
+
+    # Insert the post into the database
     try:
-        posts_collection.insert_one(post_data)
-        return jsonify({'message': 'Post created successfully'}), 201
+        result = posts_collection.insert_one(post_data)
+        post_id = result.inserted_id
+
+        return jsonify({
+            "message": "Post created successfully",
+            "Post ID": str(post_id),
+            "Post Title": post_data['title'],
+            "Post Data": post_data['text'],
+            "Post Tags": post_data['tags'],
+            "Thumbnails Url": post_data['thumbnail_url']
+        }), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500  # Internal server error
 
@@ -61,24 +93,43 @@ def create_post(current_user):
 @posts_bp.route('/posts/<post_id>', methods=['PUT'])
 @token_required
 def update_post(current_user, post_id):
-    data = request.json
+    global file
     update_data = {}
+    try:
+        file = request.files.get('thumbnail')
+        title = request.form.get('title')
+        text = request.form.get("text")
+        tags = request.form.get("tags")
+        comment = request.form.get("comments")
+        if title:
+            update_data["title"] = title
+        if text:
+            update_data["text"] = text
+        if tags:
+            update_data['tags'] = [tags]
+        if comment:
+            update_data['comments'] = comment
+        print(update_data)
+    except:
+        print("invalid input")
+    try:
+        file_id = str(uuid.uuid4())
+        blob = bucket.blob(file_id)
+        blob.upload_from_file(file, content_type=file.content_type)
 
-    if "title" in data:
-        update_data["title"] = data["title"]
-    if "text" in data:
-        update_data["text"] = data["text"]
-    if "tags" in data:
-        if isinstance(data['tags'], list):
-            update_data["tags"] = data["tags"]
-        else:
-            update_data['tags'] = [data['tags']]
+        # Get the public URL of the uploaded file
+        thumbnail_url = blob.public_url
+        update_data['thumbnail_url'] = thumbnail_url
+        print(thumbnail_url)
+    except:
+        print("file not found")
 
     if not update_data:
         return jsonify({"error": "No valid fields to update"}), 400
 
     try:
-        result = posts_collection.update_one({"_id": ObjectId(post_id), 'author_id': current_user['_id']}, {"$set": update_data})
+        result = posts_collection.update_one({"_id": ObjectId(post_id), 'author_id': current_user['_id']},
+                                             {"$set": update_data})
         if result.modified_count > 0:
             return jsonify({"message": "Post updated successfully"}), 200
         else:
@@ -102,8 +153,7 @@ def delete_post(current_user, post_id):
 @posts_bp.route("/posts/comments/<post_id>", methods=["POST"])
 @token_required
 def add_comments(current_user, post_id):
-    data = request.json
-    comments = data.get("comments")
+    comments = request.form.get("comments")
     if not comments:
         return jsonify({"error": "Missing comments in request"}), 400
 
@@ -126,8 +176,7 @@ def add_comments(current_user, post_id):
 @posts_bp.route("/posts/comments/<post_id>", methods=["DELETE"])
 @token_required
 def delete_comments(current_user, post_id):
-    data = request.json
-    comments = data.get("comments")
+    comments = request.form.get("comments")
     if not comments:
         return jsonify({"error": "Missing comments in request"}), 400
 
@@ -144,15 +193,15 @@ def delete_comments(current_user, post_id):
 @posts_bp.route("/posts/comments/<post_id>", methods=["PUT"])
 @token_required
 def update_comments(current_user, post_id):
-    data = request.json
-    pre_comment = data.get("pre_comment")
-    new_comment = data.get("new_comment")
+    pre_comment = request.form.get("pre_comment")
+    new_comment = request.form.get("new_comment")
 
     if not pre_comment or not new_comment:
         return jsonify({"error": "Missing pre_comment or new_comment in request"}), 400
 
     try:
-        result = posts_collection.update_one({"_id": ObjectId(post_id), "comments": pre_comment}, {"$set": {"comments.$": new_comment}})
+        result = posts_collection.update_one({"_id": ObjectId(post_id), "comments": pre_comment},
+                                             {"$set": {"comments.$": new_comment}})
         if result.modified_count > 0:
             return jsonify({"message": "Comment updated successfully"}), 200
         else:
@@ -164,8 +213,8 @@ def update_comments(current_user, post_id):
 @posts_bp.route("/posts/reactions/<post_id>", methods=["PUT"])
 @token_required
 def post_reaction(current_user, post_id):
-    data = request.json
-    action = data.get("action")
+
+    action = request.form.get("action")
 
     if action not in ['like', 'dislike']:
         return jsonify({"error": "Invalid action. Use 'like' or 'dislike'"}), 400

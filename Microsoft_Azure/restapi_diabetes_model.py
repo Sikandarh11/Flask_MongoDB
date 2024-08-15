@@ -3,7 +3,6 @@ from flask import Flask, request, jsonify
 import requests
 from pymongo import MongoClient
 
-# MongoDB connection
 connection_string = 'mongodb+srv://sikandarnust1140:ZBXI5No3tsTeKb0u@cluster0.mo69b0z.mongodb.net/newDB?retryWrites=true&w=majority'
 client = MongoClient(connection_string)
 database = client['Diabetes_Prediction']
@@ -20,7 +19,7 @@ def predict():
     print(input_data)
     api_key = request.headers.get('Authorization')
     headers = {
-        'Authorization': f'Bearer {api_key}',  # For bearer tokens
+        'Authorization': f'Bearer {api_key}', 
         'Content-Type': 'application/json'
     }
 
@@ -45,7 +44,6 @@ def predict():
     except Exception as e:
         return jsonify({"error": f"Failed to insert data into MongoDB: {str(e)}"}), 500
 
-    # Return the JSON response including the document ID
     return jsonify(response_json_str)
 
 

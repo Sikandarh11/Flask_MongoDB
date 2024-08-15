@@ -60,7 +60,7 @@ def get_patient_data(patient_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/delete_patient_data/<patient_id>', methods=['GET'])
+@app.route('/delete_patient_data/<patient_id>', methods=['DELETE'])
 def delete_patient_data(patient_id):
     try:
         data = collection.find_one({'_id': ObjectId(patient_id)})
